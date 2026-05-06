@@ -38,7 +38,6 @@ frontend framework you like, but again it must have a real connection to your ba
 will not be particular on how the frontend looks, rather the use of DevOps throughout the
 assignment.
 
-
 ### Part 1 – Docker Introduction ( 23 /2- 1 /3)
 
 Like all programming problems, learning a new technology is not an exercise in reading but
@@ -52,7 +51,7 @@ You will practice creating Docker images and containers
 1. Get Spring boot backend working in a Docker Container
 2. Get PostgreSQL working in a Docker Container
 3. Get React frontend working in a Docker Container (to be added later depending on
-    how far you are in the WEB2 course)
+   how far you are in the WEB2 course)
 
 ### Part 2 – Running the whole App with Docker Compose ( 2 / 3 - 15 / 3 )
 
@@ -66,15 +65,14 @@ You will create docker-compose yaml file that will orchestrate the backend and t
 using container images (The frontend will be added later in the course).
 
 1. Create the Compose file for Docker Compose. This is done by creating a file called
-    **docker-compose.yml** at the root of the project.
+   **docker-compose.yml** at the root of the project.
 2. Build and run the app stack. From your project directory, start up your application by
-    running **docker compose up**.
+   running **docker compose up**.
 3. Verify that the application stack is running as expected (Test as well as looking on the
-    Docker Dashboard).
+   Docker Dashboard).
 4. Stop the application, either by running **docker compose down** from within your
-    project directory in the second terminal, or by hitting **CTRL+C** in the original
-    terminal where you started the app.
-
+   project directory in the second terminal, or by hitting **CTRL+C** in the original
+   terminal where you started the app.
 
 ### Part 3 – Deploy to Kubernetes ( 16 / 3 - 17 / 4 )
 
@@ -89,9 +87,9 @@ the applications and database to Kubernetes.
 You will create Kubernetes resources including deployment and service resource files.
 
 1. Create a deployment resource ( **deployment.yaml** ) - telling Kubernetes what container
-    you want, how they should be running and how many of them should be running.
+   you want, how they should be running and how many of them should be running.
 2. Create a service resource ( **service.yaml** ) – which will take care of serving the
-    application to connections from outside of the cluster.
+   application to connections from outside of the cluster.
 3. Create any other resource that might need. For example, PV, PVC, ConfigMap, etc
 4. Apply the resource files and verify your deployment.
 
@@ -100,3 +98,27 @@ You will create Kubernetes resources including deployment and service resource f
 **$ kubectl apply -f pathtoyourfiles/service.yaml**
 
 5. Use minikube commands and the _minikube dashboard_ to see more details.
+
+### Part 4 – Create CI/CD Pipeline (20/4 - 4/5)
+
+In this exercise, we’ll create Continuous Integration (CI) and Continuous Deployment (CD)
+workflow using Github Actions. This will automatically run the tests, build images and deploy
+the applications to Kubernetes cluster using Minikube, either on a pull request or a push to
+the main/master branch. Feel free to use your preferred strategy.
+Before you continue, modify your Kubernetes deployment resource file with imagePullPolicy:
+Never in order to use the existing image on the node.
+
+#### WHAT YOU NEED TO DO:
+
+You will create the CI/CD workflow for the project either in separate yaml files or merged to
+one file.
+
+1. Create a Continuous Integration workflow (eg:, ci-workflow.yaml) in the project root
+   as follows: .github/workflow/ci-workflow.yaml.
+2. Add the actions to run tests, build and publish image.
+3. Commit your changes and ensure that you get to a “green state”
+4. Create a Continuous Deployment workflow (eg:, cd-workflow.yaml) as before or
+   merge the two files into one ci-cd-workflow.yaml.
+5. Add jobs/actions to automatically deploy to Minikube.
+6. Commit your changes and observe the workflow in the GitHub repository under
+   “Actions”.

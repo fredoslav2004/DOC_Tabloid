@@ -1,0 +1,211 @@
+name: CI/CD Pipeline
+
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+  push:
+    branches:
+      - main
+      - master
+
+env:
+  BACKEND_IMAGE: viatab-backend
+  FRONTEND_IMAGE: viatab-frontend
+
+jobs:
+  ci:
+    name: Test, build and publish images
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      CI_SPRING_DATASOURCE_URL: ${{ vars.CI_SPRING_DATASOURCE_URL }}
+      POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+      POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+          POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate CI configuration
+        run: |
+          missing=0
+          for name in CI_SPRING_DATASOURCE_URL POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not configured"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Set image namespace
+        run: echo "IMAGE_NAMESPACE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "24"
+          cache: maven
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Run backend tests
+        working-directory: backend
+        env:
+          SPRING_DATASOURCE_URL: ${{ env.CI_SPRING_DATASOURCE_URL }}
+          SPRING_DATASOURCE_USERNAME: ${{ env.POSTGRES_USER }}
+          SPRING_DATASOURCE_PASSWORD: ${{ env.POSTGRES_PASSWORD }}
+        run: ./mvnw -B test
+
+      - name: Package backend
+        working-directory: backend
+        run: ./mvnw -B -DskipTests package
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build backend image
+        run: |
+          docker build \
+            --tag "$IMAGE_NAMESPACE/$BACKEND_IMAGE:$GITHUB_SHA" \
+            --tag "$IMAGE_NAMESPACE/$BACKEND_IMAGE:latest" \
+            backend
+
+      - name: Build frontend image
+        run: |
+          docker build \
+            --tag "$IMAGE_NAMESPACE/$FRONTEND_IMAGE:$GITHUB_SHA" \
+            --tag "$IMAGE_NAMESPACE/$FRONTEND_IMAGE:latest" \
+            frontend
+
+      - name: Publish backend image
+        if: github.event_name == 'push'
+        run: |
+          docker push "$IMAGE_NAMESPACE/$BACKEND_IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE_NAMESPACE/$BACKEND_IMAGE:latest"
+
+      - name: Publish frontend image
+        if: github.event_name == 'push'
+        run: |
+          docker push "$IMAGE_NAMESPACE/$FRONTEND_IMAGE:$GITHUB_SHA"
+          docker push "$IMAGE_NAMESPACE/$FRONTEND_IMAGE:latest"
+
+  cd:
+    name: Deploy to Minikube
+    runs-on: ubuntu-latest
+    needs: ci
+    if: github.event_name == 'push'
+
+    permissions:
+      contents: read
+
+    env:
+      K8S_SPRING_DATASOURCE_URL: ${{ vars.K8S_SPRING_DATASOURCE_URL }}
+      POSTGRES_DB: ${{ vars.POSTGRES_DB }}
+      POSTGRES_USER: ${{ vars.POSTGRES_USER }}
+      POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate CD configuration
+        run: |
+          missing=0
+          for name in K8S_SPRING_DATASOURCE_URL POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not configured"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "24"
+          cache: maven
+
+      - name: Package backend
+        working-directory: backend
+        run: ./mvnw -B -DskipTests package
+
+      - name: Start Minikube
+        uses: medyagh/setup-minikube@latest
+
+      - name: Build backend image inside Minikube
+        run: minikube image build -t viatab-backend:latest backend
+
+      - name: Build frontend image inside Minikube
+        run: minikube image build -t viatab-frontend:latest frontend
+
+      - name: Create application configuration
+        run: |
+          kubectl create configmap viatab-config \
+            --from-literal=SPRING_DATASOURCE_URL="$K8S_SPRING_DATASOURCE_URL" \
+            --from-literal=SPRING_DATASOURCE_USERNAME="$POSTGRES_USER" \
+            --from-literal=SPRING_DATASOURCE_PASSWORD="$POSTGRES_PASSWORD" \
+            --from-literal=POSTGRES_DB="$POSTGRES_DB" \
+            --from-literal=POSTGRES_USER="$POSTGRES_USER" \
+            --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+            --dry-run=client \
+            -o yaml \
+            | kubectl apply -f -
+
+      - name: Deploy Kubernetes resources
+        run: |
+          kubectl apply -f k8s/pvc.yaml
+          kubectl apply -f k8s/service.yaml
+          kubectl apply -f k8s/deployment.yaml
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/db --timeout=300s
+          kubectl rollout status deployment/backend --timeout=300s
+          kubectl rollout status deployment/frontend --timeout=300s
+          kubectl get services

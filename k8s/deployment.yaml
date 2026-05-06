@@ -46,7 +46,7 @@ spec:
     spec:
       containers:
       - name: backend
-        image: viatab-backend
+        image: viatab-backend:latest
         imagePullPolicy: Never
         ports:
         - containerPort: 8080
@@ -71,7 +71,7 @@ spec:
     spec:
       containers:
       - name: frontend
-        image: viatab-frontend
+        image: viatab-frontend:latest
         imagePullPolicy: Never
         ports:
         - containerPort: 80
